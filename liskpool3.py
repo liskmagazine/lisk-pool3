@@ -56,14 +56,21 @@ def addressToBinary(address):
 	s = base64.b32decode(s)
 	return s.hex()
 
-def r(conf, ep):
+def req(conf, ep):
 	uri = conf['apiEndpoint'] + ep
 	d = requests.get (uri)
 	return d.json ()
 
+r = req
+
+def injectRequestHandler(rr):
+	global r
+	r = rr
 
 # Parse command line args
 def parseArgs():
+	global ONLY_UPDATE, DRY_RUN
+
 	parser = argparse.ArgumentParser(description='DPOS delegate pool script')
 	parser.add_argument('-c', metavar='config.json', dest='cfile', action='store',
 		           default='config.json',
@@ -176,54 +183,60 @@ def getForgedSinceLastPayout(conf, pstate):
 			'producedBlocks': int(acc['producedBlocks'])
 		}
 	
-	print ('%d produced blocks since last payout, %.8f lsk to pay' % (dBlocks, toPay / 100000000.))	
-	return toPay, pstate
+	return toPay, pstate, dBlocks
 	
 def calculateRewards(conf, pstate, votes, pendingRewards):
 	for x in votes:
 		top = int(pendingRewards * x['percentage'] / 100.)
+		addr = x['address']
 		
+		# If x is the delegate
 		if 'username' in x and x['username'] == conf['delegateName']:
 			print ('Delegate %s got %.8f lsk of reward' % (x['username'], top / 100000000.))
 
-			if not (x['address'] in pstate['paid']):
-				pstate['paid'][x['address']] = top
+			if not (addr in pstate['paid']):
+				pstate['paid'][addr] = top
 			else:
-				pstate['paid'][x['address']] += top
+				pstate['paid'][addr] += top
 				
+		# Otherwise increase pending for the address
 		else:
-			if not (x['address'] in pstate['pending']):
-				pstate['pending'][x['address']] = top
+			if not (addr in pstate['pending']):
+				pstate['pending'][addr] = top
 			else:
-				pstate['pending'][x['address']] += top
+				pstate['pending'][addr] += top
 	return pstate
 	
 def payPendings(conf, pstate):
 	paylist = []
 	
+	# For each pending balance, check if meets requirements for payment
 	for x in pstate['pending']:
-		if (not ONLY_UPDATE) and pstate['pending'][x] > int (conf['minPayout'] * 100000000):
-			paylist.append([x, pstate['pending'][x]])
+		apend = pstate['pending'][x]
+
+		if (not ONLY_UPDATE) and (apend > int (conf['minPayout'] * 100000000)):
+			paylist.append([x, apend])
 			
 			if not (x in pstate['paid']):
-				pstate['paid'][x] = pstate['pending'][x]
+				pstate['paid'][x] = apend
 			else:
-				pstate['paid'][x] += pstate['pending'][x]
+				pstate['paid'][x] += apend
 
 			pstate['pending'][x] = 0
 				
 	return pstate, paylist
 
 def paymentCommandForLiskCore(conf, address, amount):
-	FEE = '200000'
+	FEE = '250000'
 	cmds = []
 
-	cmds.append('TXC=`lisk-core transaction:create 2 0 %s --offline --network %s --network-identifier %s --nonce=\`echo $NONCE\` --passphrase="\`echo $PASSPHRASE\`" --asset=\'{"data": "%s payouts", "amount":%s,"recipientAddress":"%s"}\'`' 
+	cmds.append('\n #Sending %d to %s' % (amount / 10**8, address))
+	cmds.append('TXC=`lisk-core transaction:create 2 0 %s --offline --network %s --network-identifier %s --nonce=\`echo $NONCE\` --passphrase="\`echo $PASSPHRASE\`" --asset=\'{"data": "%s payouts", "amount":%s,"recipientAddress":"%s"}\' | jq .transaction -r`' 
 			% (FEE, conf['network'], NETWORKS[conf['network']], conf['delegateName'], amount, addressToBinary(address)))
 
 	if conf['multiSignature']:
-		cmds.append('TXC=`lisk-core transaction:sign `echo $TXC` --mandatory-keys=$PUB1 --mandatory-keys=$PUB2 --sender-public-key=$PUB1 --passphrase="\`echo $PASSPHRASE\`"`')
-		cmds.append('TXC=`lisk-core transaction:sign `echo $TXC` --mandatory-keys=$PUB1 --mandatory-keys=$PUB2 --sender-public-key=$PUB2 --passphrase="\`echo $PASSPHRASE2\`"`')
+		cmds.append('TXC=`lisk-core transaction:sign $TXC --mandatory-keys=$PUB1 --mandatory-keys=$PUB2 --sender-public-key=$PUB1 --passphrase="\`echo $PASSPHRASE\`" | jq .transaction -r`')
+		cmds.append('TXC=`lisk-core transaction:sign $TXC --mandatory-keys=$PUB1 --mandatory-keys=$PUB2 --sender-public-key=$PUB1 --passphrase="\`echo $PASSPHRASE2\`"`')
 
 	cmds.append('echo $TXC')
 	cmds.append('NONCE=$(($NONCE+1))')
@@ -235,6 +248,10 @@ def paymentCommandForLiskCore(conf, address, amount):
 def savePayments(conf, topay):
 	addr = r(conf, 'accounts?username=' + conf['delegateName'])['data'][0]['summary']['address']
 	binAddress = addressToBinary(addr)
+	
+	if 'fromAddress' in conf and (conf['fromAddress']):
+		binAddress = addressToBinary(conf['fromAddress'])
+		
 	st = ['echo Write passphrase: ', 'read PASSPHRASE']
 
 	if conf['multiSignature']:
@@ -242,8 +259,8 @@ def savePayments(conf, topay):
 		st.append('read PASSPHRASE2')
 
 		# Generate pubkey for first and second passphrase, save to variables
-		st.append('PUB1="`lisk-core account:get %s | jq .keys.mandatoryKeys[0]`"' % (binAddress))
-		st.append('PUB2="`lisk-core account:get %s | jq .keys.mandatoryKeys[1]`"' % (binAddress))
+		st.append('PUB1="`lisk-core account:get %s | jq .keys.mandatoryKeys[0] -r`"' % (binAddress))
+		st.append('PUB2="`lisk-core account:get %s | jq .keys.mandatoryKeys[1] -r`"' % (binAddress))
 
 
 	# Calculate initial nonce
@@ -265,13 +282,16 @@ def savePayments(conf, topay):
 		f.close()
 	print('Saved to %s' % (conf['paymentsFile']))
 
+
 def main():
 	conf = parseArgs()
 	pstate = loadPoolState(conf)
 	votes = getVotesPercentages(conf)
-	pendingRewards, pstate = getForgedSinceLastPayout(conf, pstate)
+	rewards, pstate, dBlocks = getForgedSinceLastPayout(conf, pstate)
 	
-	pendingRewards = int(pendingRewards * conf['sharingPercentage'] / 100.)
+	pendingRewards = int(rewards * conf['sharingPercentage'] / 100.)
+
+	print ('%d produced blocks since last payout, %.8f lsk to pay' % (dBlocks, pendingRewards / 100000000.))	
 	
 	pstate = calculateRewards(conf, pstate, votes, pendingRewards)
 	pstate, topay = payPendings(conf, pstate)
@@ -299,12 +319,13 @@ def main():
 	# Save payments
 	if not ONLY_UPDATE:
 		savePayments(conf, topay)
+		paidRewards = reduce(lambda x,y: x + int(y[1]), topay, 0)
 	
 		# Save state
 		pstate['history'].append({
 			'date': int(time.time()),
 			'userPaid': len(topay),
-			'rewards': pendingRewards
+			'rewards': paidRewards
 		})
 	savePoolState(conf, pstate)
 

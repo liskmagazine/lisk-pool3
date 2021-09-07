@@ -1,5 +1,8 @@
 # Lisk pool distribution software (v3)
 
+![Test](https://github.com/dakk/lisk-pool3/actions/workflows/python-app.yml/badge.svg)
+
+
 Redistribution software for Lisk delegate on mainnet (and testnet) after the migration to Lisk3. 
 
 **Still WIP, use at your own risk***
@@ -10,8 +13,8 @@ Fork this repo; edit config.json and modify the first lines with your settings:
 
 ```js
 {
-	"apiEndpoint": "https://testnet-service.lisk.io/api/v2/",   // Node uri
-	"network": "testnet",										// Or mainnet
+	"apiEndpoint": "https://service.lisk.io/api/v2/",   		// Node uri
+	"network": "mainnet",									    // Or testnet
 	"interactive": true,                                        // Ask for confirmation
 	"delegateName": "dakk",                                     // Delegate name      
 	"sharingPercentage": 15,                                    // % of sharing
@@ -20,7 +23,8 @@ Fork this repo; edit config.json and modify the first lines with your settings:
 	"poolState": "poollogs.json",                               // Where to save pool state
 	"paymentsFile": "payments.sh",                              // Where to save payments commands
 	"includeSelfStake": false,                                  // True if we want to include selfstake in distribution calculations
-	"multiSignature": false										// True if you're using a multisig account
+	"multiSignature": false,				    // True if you're using a multisig account
+	"fromAddress": ""					    // Address from where to make the payments. Remove if the payments will be made from the delegate's address
 }
 ```
 
@@ -30,7 +34,7 @@ Fork this repo; edit config.json and modify the first lines with your settings:
 python liskpool3.py
 ```
 
-If you want to update pending balances without paying, use ```--only-update``` options
+If you want to update pending balances without paying, use ```--only-update``` option
 
 
 ## Frontend
@@ -39,13 +43,17 @@ The software has a tiny frontend written in angular. In order to create and upda
 
 ```bash
 npm install -g @angular/cli
+cd pool-frontend
+npm install
 ```
 
 And update with:
 
 ```bash
-bash update_frontend.sh
+bash update_frontend.sh [base_directory]
 ```
+
+Where base directory is the base directory of the frontend (leave blank if it stays in the toplevel).
 
 
 ## License
