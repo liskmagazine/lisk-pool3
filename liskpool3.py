@@ -22,10 +22,21 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+import sys 
+
+if sys.version_info[0] < 3:
+	print ('python2 not supported, please use python3')
+	sys.exit (0)
+
+try:
+	import requests
+except:
+	print ('please install requests library (pip3 install requests)')
+	sys.exit (0)
+
+
 import base64
-import requests
 import json
-import sys
 import time
 import argparse 
 from functools import reduce
@@ -39,11 +50,6 @@ NETWORKS = {
 	'testnet': '15f0dacc1060e91818224a94286b13aa04279c640bd5d6f193182031d133df7c',
 	'mainnet': '4c09e6a781fc4c7bdb936ee815de8f94190f8a7519becd9de2081832be309a99'
 }
-
-
-if sys.version_info[0] < 3:
-	print ('python2 not supported, please use python3')
-	sys.exit (0)
 
 
 def addressToBinary(address):
@@ -105,7 +111,6 @@ def parseArgs():
 		DRY_RUN = args.dryrun
 
 	if args.onlyupdate != None:
-		print ("Only updating pendings")
 		ONLY_UPDATE = args.onlyupdate
 		
 	if args.alwaysyes:
@@ -236,11 +241,11 @@ def paymentCommandForLiskCore(conf, address, amount):
 
 	if conf['multiSignature']:
 		cmds.append('TXC=`lisk-core transaction:sign $TXC --mandatory-keys=$PUB1 --mandatory-keys=$PUB2 --sender-public-key=$PUB1 --passphrase="\`echo $PASSPHRASE\`" | jq .transaction -r`')
-		cmds.append('TXC=`lisk-core transaction:sign $TXC --mandatory-keys=$PUB1 --mandatory-keys=$PUB2 --sender-public-key=$PUB1 --passphrase="\`echo $PASSPHRASE2\`"`')
+		cmds.append('TXC=`lisk-core transaction:sign $TXC --mandatory-keys=$PUB1 --mandatory-keys=$PUB2 --sender-public-key=$PUB1 --passphrase="\`echo $PASSPHRASE2\`" |jq .transaction -r`')
 
 	cmds.append('echo $TXC')
 	cmds.append('NONCE=$(($NONCE+1))')
-	cmds.append('lisk-core transaction:send `echo $TXC|jq .transaction -r`')
+	cmds.append('lisk-core transaction:send `echo $TXC`')
 
 	return '\n'.join(cmds)
 
