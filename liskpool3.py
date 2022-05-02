@@ -96,6 +96,9 @@ def parseArgs():
 	parser.add_argument('--dry-run', dest='dryrun', action='store_const',
 		           default=False, const=True,
 		           help='dry run (default: no)')
+	parser.add_argument('--force', dest='force', action='store_const',
+		           default=False, const=True,
+		           help='disable all security checks (default: no)')
 	parser.add_argument('--only-update', dest='onlyupdate', action='store_const',
 		           default=False, const=True,
 		           help='only update pendings (default: no)')
@@ -115,6 +118,9 @@ def parseArgs():
 	# Override minpayout from command line arg
 	if args.minpayout != None:
 		conf['minPayout'] = args.minpayout
+
+	if args.force != None:
+		conf['force'] = args.force
 
 	if args.dryrun != None:
 		DRY_RUN = args.dryrun
@@ -164,8 +170,14 @@ def loadPoolState(conf):
 		
 		
 def getVotesPercentages(conf):
-	votes = r(conf, 'votes_received?limit=100&offset=0&aggregate=true&username=' + conf['delegateName'])['data']['votes']
-	
+	d = r(conf, 'votes_received?limit=100&offset=0&aggregate=true&username=' + conf['delegateName'])
+	votes = d['data']['votes']
+
+	if d['meta']['total'] > 100:
+		for x in range(100, d['meta']['total'], 100):
+			d = r(conf, 'votes_received?limit=100&offset=' + str(x) + '&aggregate=true&username=' + conf['delegateName'])
+			votes += d['data']['votes']
+
 	if not conf['includeSelfStake']:
 		votes = [x for x in votes if ('username' not in x ) or ('username' in x and x['username'] != conf['delegateName'])]
 
@@ -186,6 +198,20 @@ def getForgedSinceLastPayout(conf, pstate):
 	
 	toPay = int(acc['rewards']) - int(pstate['lastPayout']['rewards'])
 	dBlocks = int(acc['producedBlocks']) - int(pstate['lastPayout']['producedBlocks'])
+	
+	elapsed = int ((time.time() - pstate['lastPayout']['date']) / 60.)
+	estimatedBlocks = int(elapsed / 15)
+
+
+	if dBlocks > estimatedBlocks:
+		print ('WARNING: Estimated blocks forged since last payout: %d (estimated: %d)' % (dBlocks, estimatedBlocks))
+		if not conf['force'] and not conf['interactive']:
+			print ('Use --force to force payout')
+			sys.exit(0)
+			
+		if conf['interactive']:
+			if not input ('Continue anyway? (y/n) ') == 'y':
+				sys.exit(0)
 
 	if toPay <= 0 or dBlocks <= 0:
 		toPay = 0
@@ -253,10 +279,10 @@ def paymentCommandForLiskCore(conf, address, amount):
 		cmds.append('TXC=`lisk-core transaction:sign $TXC --mandatory-keys=$PUB1 --mandatory-keys=$PUB2 --sender-public-key=$PUB1 --passphrase="\`echo $PASSPHRASE2\`" |jq .transaction -r`')
 
 	cmds.append('echo $TXC')
-        cmds.append('sleep 5')
+	cmds.append('sleep 5')
 	cmds.append('NONCE=$(($NONCE+1))')
 	cmds.append('lisk-core transaction:send `echo $TXC`')
-        cmds.append('sleep 5')
+	cmds.append('sleep 5')
 
 	return '\n'.join(cmds)
 
